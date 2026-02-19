@@ -20,24 +20,24 @@ class OCRProcessor:
         self.max_workers = max_workers
 
     def _encode_image(self, image_path: str) -> str:
-        """Convert image to base64 string"""
+        """Pārvērš attēlu par base64 virkni"""
         with open(image_path, "rb") as image_file:
             return base64.b64encode(image_file.read()).decode("utf-8")
 
     def _pdf_to_images(self, pdf_path: str) -> List[str]:
         """
-        Convert each page of a PDF to an image using pymupdf.
-        Saves each page as a temporary image.
-        Returns a list of image paths.
+        Pārvērš katru PDF lapu par attēlu, izmantojot pymupdf.
+        Saglabā katru lapu kā pagaidu attēlu.
+        Atgriež attēlu ceļu sarakstu.
         """
         try:
             doc = pymupdf.open(pdf_path)
             image_paths = []
             for page_num in range(doc.page_count):
                 page = doc[page_num]
-                pix = page.get_pixmap()  # Render page to an image
-                temp_path = f"{pdf_path}_page{page_num}.png"  # Define output image path
-                pix.save(temp_path)  # Save the image
+                pix = page.get_pixmap()  # Renderē lapu kā attēlu
+                temp_path = f"{pdf_path}_page{page_num}.png"  # Definē izvades attēla ceļu
+                pix.save(temp_path)  # Saglabā attēlu
                 image_paths.append(temp_path)
             doc.close()
             return image_paths
@@ -46,40 +46,40 @@ class OCRProcessor:
 
     def _preprocess_image(self, image_path: str, language: str = "en") -> str:
         """
-        Preprocess image before OCR:
-        - Convert PDF to image if needed (using pymupdf)
-        - Language-specific preprocessing (if applicable)
-        - Enhance contrast
-        - Reduce noise
+        Attēla priekšapstrāde pirms OCR:
+        - Ja nepieciešams, pārvērš PDF par attēlu (izmantojot pymupdf)
+        - Valodai specifiska priekšapstrāde (ja piemērojams)
+        - Kontrasta uzlabošana
+        - Trokšņa samazināšana
         """
-        # Read image
+        # Nolasa attēlu
         image = cv2.imread(image_path)
         if image is None:
             raise ValueError(f"Could not read image at {image_path}")
 
-        # Convert to grayscale
+        # Pārvērš par pelēktoņu
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-        # Enhance contrast using CLAHE
+        # Uzlabo kontrastu, izmantojot CLAHE
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
         enhanced = clahe.apply(gray)
 
-        # Denoise
+        # Noņem troksni
         denoised = cv2.fastNlMeansDenoising(enhanced)
 
-        # Language-specific thresholding
+        # Valodai specifiska sliekšņošana
         if language.lower() in ["japanese", "chinese", "zh", "korean"]:
-            # For some CJK and similar languages adaptive thresholding may work better
+            # Dažām CJK un līdzīgām valodām adaptīvā sliekšņošana var darboties labāk
             thresh = cv2.adaptiveThreshold(
                 denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
                 cv2.THRESH_BINARY, 11, 2)
             thresh = cv2.bitwise_not(thresh)
         else:
-            # Default: Otsu thresholding
+            # Noklusējums: Otsu sliekšņošana
             thresh = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
             thresh = cv2.bitwise_not(thresh)
 
-        # Save preprocessed image
+        # Saglabā priekšapstrādāto attēlu
         preprocessed_path = f"{image_path}_preprocessed.jpg"
         cv2.imwrite(preprocessed_path, thresh)
 
@@ -88,7 +88,7 @@ class OCRProcessor:
     def process_image(self, image_path: str, format_type: str = "markdown", preprocess: bool = True, 
                       custom_prompt: str = None, language: str = "en") -> str:
         """
-        Process an image (or PDF) and extract text in the specified format
+        Apstrādā attēlu (vai PDF) un izvelk tekstu norādītajā formātā
 
         Args:
             image_path: Path to the image file or PDF file
@@ -98,13 +98,13 @@ class OCRProcessor:
             language: Language code to apply language specific OCR preprocessing
         """
         try:
-            # If the input is a PDF, process all pages
+            # Ja ievade ir PDF, apstrādā visas lapas
             if image_path.lower().endswith('.pdf'):
                 image_pages = self._pdf_to_images(image_path)
                 print("No. of pages in the PDF", len(image_pages))
                 responses = []
                 for idx, page_file in enumerate(image_pages):
-                    # Process each page with preprocessing if enabled
+                    # Apstrādā katru lapu ar priekšapstrādi, ja tā ir iespējota
                     if preprocess:
                         preprocessed_path = self._preprocess_image(page_file, language)
                     else:
@@ -114,7 +114,7 @@ class OCRProcessor:
 
                     if custom_prompt and custom_prompt.strip():
                         prompt = custom_prompt
-                        print("Using custom prompt:", prompt)  # Debug print
+                        print("Using custom prompt:", prompt)  # Atkļūdošanas izdruka
                     else:
                         prompts = {
                             "markdown": f"""Extract all text content from this image in {language} **exactly as it appears**, without modification, summarization, or omission.
@@ -166,9 +166,9 @@ class OCRProcessor:
 
                         }
                         prompt = prompts.get(format_type, prompts["text"])
-                        print("Using default prompt:", prompt)  # Debug print
+                        print("Using default prompt:", prompt)  # Atkļūdošanas izdruka
 
-                    # Prepare the request payload
+                    # Sagatavo pieprasījuma datu daļu
                     payload = {
                         "model": self.model_name,
                         "prompt": prompt,
@@ -176,15 +176,15 @@ class OCRProcessor:
                         "images": [image_base64]
                     }
 
-                    # Make the API call to Ollama
+                    # Veic API izsaukumu uz Ollama
                     response = requests.post(self.base_url, json=payload)
                     response.raise_for_status()
                     res = response.json().get("response", "")
                     print("Page No. Processed", idx)
-                    # Prefix result with page number
+                    # Pievieno rezultātam lapas numuru
                     responses.append(f"Page {idx + 1}:\n{res}")
 
-                    # Clean up temporary files
+                    # Iztīra pagaidu failus
                     if preprocess and preprocessed_path.endswith('_preprocessed.jpg'):
                         os.remove(preprocessed_path)
                     if page_file.endswith('.png'):
@@ -199,13 +199,13 @@ class OCRProcessor:
                         return final_result
                 return final_result
 
-            # Process non-PDF images as before.
+            # Apstrādā attēlus, kas nav PDF, kā iepriekš.
             if preprocess:
                 image_path = self._preprocess_image(image_path, language)
 
             image_base64 = self._encode_image(image_path)
 
-            # Clean up temporary files
+            # Iztīra pagaidu failus
             if image_path.endswith(('_preprocessed.jpg', '_temp.jpg')):
                 os.remove(image_path)
 
@@ -261,7 +261,7 @@ class OCRProcessor:
                                 """,
                 }
                 prompt = prompts.get(format_type, prompts["text"])
-                print("Using default prompt:", prompt)  # Debug print
+                print("Using default prompt:", prompt)  # Atkļūdošanas izdruka
 
             payload = {
                 "model": self.model_name,
@@ -296,7 +296,7 @@ class OCRProcessor:
         language: str = "en"
     ) -> Dict[str, Any]:
         """
-        Process multiple images in batch
+        Apstrādā vairākus attēlus pakešrežīmā
         
         Args:
             input_path: Path to directory or list of image paths
@@ -309,7 +309,7 @@ class OCRProcessor:
         Returns:
             Dictionary with results and statistics
         """
-        # Collect all image paths
+        # Savāc visus attēlu ceļus
         image_paths = []
         if isinstance(input_path, str):
             base_path = Path(input_path)
@@ -325,7 +325,7 @@ class OCRProcessor:
         results = {}
         errors = {}
         
-        # Process images in parallel with progress bar
+        # Apstrādā attēlus paralēli ar progresa joslu
         with tqdm(total=len(image_paths), desc="Processing images") as pbar:
             with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 future_to_path = {
